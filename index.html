@@ -2,116 +2,91 @@
 <html lang="pl">
 <head>
 <meta charset="UTF-8">
-<meta name="viewport" content="width=device-width,initial-scale=1.0">
-<title>8GB BMP 2×2</title>
+<title>8GB Stream BMP</title>
 <style>
-  body{background:#0f0f12;color:#e8e8ea;font-family:system-ui,sans-serif;margin:0;padding:16px}
-  button{padding:10px 14px;font-size:15px;background:#1f1f26;color:#e8e8ea;border:1px solid #333;border-radius:8px;cursor:pointer}
-  #log{white-space:pre-wrap;background:#121218;border:1px solid #222;padding:10px;border-radius:8px;margin-top:12px}
+body{background:#111;color:#eee;font-family:sans-serif;padding:20px}
+#bar{width:100%;height:24px;background:#333;border-radius:6px;overflow:hidden}
+#prog{height:100%;width:0%;background:#4caf50}
+canvas{border:1px solid #444;margin-top:10px;max-width:600px}
 </style>
 </head>
 <body>
-<h2>Generator BMP ~8GB (4 obrazy w kwadracie 2×2)</h2>
-<button id="start">Generuj i zapisz</button>
-<div id="log"></div>
+
+<h3>Generator 8GB BMP (strumieniowy)</h3>
+<button onclick="start()">Start</button>
+<div id="bar"><div id="prog"></div></div>
+<div id="txt">0%</div>
+<canvas id="preview" width="512" height="512"></canvas>
 
 <script>
-const logEl = document.getElementById("log");
-const log = t => { logEl.textContent += t + "\\n"; };
+const QW = 32768;
+const QH = 21845;
+const W = QW*2;
+const H = QH*2;
 
-// Wymiary ćwiartki dobrane, by 4×RGB bez kompresji ≈ 8GB.
-// Możesz zmienić, ale wtedy rozmiar się zmieni.
-const QW = 32768; // szerokość ćwiartki
-const QH = 21845; // wysokość ćwiartki
-// Całość:
-const W = QW * 2;
-const H = QH * 2;
+const preview = document.getElementById("preview");
+const pctx = preview.getContext("2d");
 
-// BMP 24-bit: 3 bajty/piksel + padding do 4 bajtów na linię
-function rowStride(width){
-  const raw = width * 3;
-  return raw + ((4 - (raw % 4)) % 4);
+function stride(w){
+  const raw=w*3;
+  return raw + ((4-(raw%4))%4);
 }
 
-function writeLE(view, offset, value, bytes){
-  for(let i=0;i<bytes;i++){
-    view.setUint8(offset+i, value & 0xFF);
-    value >>>= 8;
-  }
-}
+function rand(){return Math.floor(Math.random()*256)}
 
-async function saveHugeBMP(){
-  if(!window.showSaveFilePicker){
-    log("Twoja przeglądarka nie wspiera zapisu strumieniowego. Użyj Chrome/Edge.");
-    return;
-  }
+async function start(){
+  const handle = await showSaveFilePicker({suggestedName:"mega_8gb.bmp"});
+  const file = await handle.createWritable();
 
-  const fileHandle = await window.showSaveFilePicker({
-    suggestedName: "mega_8gb.bmp",
-    types: [{ description: "BMP", accept: {"image/bmp":[".bmp"]} }]
-  });
-  const writable = await fileHandle.createWritable();
+  const s = stride(W);
+  const size = 54 + s*H;
 
-  const stride = rowStride(W);
-  const pixelDataSize = stride * H;
-  const fileSize = 14 + 40 + pixelDataSize; // nagłówek BMP + DIB + dane
+  const header=new Uint8Array(54);
+  header[0]=0x42;header[1]=0x4D;
+  new DataView(header.buffer).setUint32(2,size,true);
+  new DataView(header.buffer).setUint32(10,54,true);
+  new DataView(header.buffer).setUint32(14,40,true);
+  new DataView(header.buffer).setUint32(18,W,true);
+  new DataView(header.buffer).setUint32(22,H,true);
+  header[26]=1;header[28]=24;
 
-  // --- Nagłówek BMP (14B) + DIB (40B) ---
-  const header = new ArrayBuffer(54);
-  const view = new DataView(header);
-  // 'BM'
-  view.setUint8(0, 0x42); view.setUint8(1, 0x4D);
-  writeLE(view, 2, fileSize, 4);
-  writeLE(view, 10, 54, 4); // offset danych
-  writeLE(view, 14, 40, 4); // rozmiar DIB
-  writeLE(view, 18, W, 4);
-  writeLE(view, 22, H, 4);
-  writeLE(view, 26, 1, 2);  // planes
-  writeLE(view, 28, 24, 2); // bpp
-  writeLE(view, 34, pixelDataSize, 4);
+  await file.write(header);
 
-  await writable.write(header);
+  const pad=new Uint8Array(s-W*3);
 
-  // --- Dane pikseli: zapis od dołu (BMP tak chce) ---
-  const pad = new Uint8Array(stride - W*3);
-  let rowsDone = 0;
-  const totalRows = H;
+  for(let y=0;y<H;y++){
+    const row=new Uint8Array(W*3);
 
-  function randByte(){ return Math.floor(Math.random()*256); }
-
-  for(let y=0; y<H; y++){
-    // Tworzymy linię z 4 różnych ćwiartek w układzie 2×2
-    const row = new Uint8Array(W*3);
-    for(let x=0; x<W; x++){
-      // Która ćwiartka?
-      const left = x < QW;
-      const top = y >= QH; // pamiętaj: zapis od dołu, więc górna połowa to y>=QH
-      // Każda ćwiartka ma własny „charakter” losowania, żeby były różne
-      let r,g,b;
-      if(left && !top){ r=randByte(); g=randByte(); b=randByte(); }             // dół-lewo
-      else if(!left && !top){ r=randByte(); g=randByte(); b=(randByte()^128); } // dół-prawo
-      else if(left && top){ r=(randByte()^64); g=randByte(); b=randByte(); }    // góra-lewo
-      else { r=randByte(); g=(randByte()^32); b=randByte(); }                   // góra-prawo
-
-      const i = x*3;
-      row[i] = b; row[i+1] = g; row[i+2] = r; // BMP: BGR
+    for(let x=0;x<W;x++){
+      let r=rand(),g=rand(),b=rand();
+      const i=x*3;
+      row[i]=b;row[i+1]=g;row[i+2]=r;
     }
-    await writable.write(row);
-    if(pad.length) await writable.write(pad);
 
-    rowsDone++;
-    if(rowsDone % 200 === 0){
-      const pct = ((rowsDone/totalRows)*100).toFixed(2);
-      log(`Postęp: ${rowsDone}/${totalRows} wierszy (${pct}%)`);
+    await file.write(row);
+    await file.write(pad);
+
+    if(y%200===0){
+      const pct=((y/H)*100).toFixed(2);
+      document.getElementById("prog").style.width=pct+"%";
+      document.getElementById("txt").textContent=pct+"%";
+
+      const img=pctx.createImageData(512,1);
+      for(let i=0;i<512;i++){
+        img.data[i*4]=row[i*3+2];
+        img.data[i*4+1]=row[i*3+1];
+        img.data[i*4+2]=row[i*3];
+        img.data[i*4+3]=255;
+      }
+      pctx.putImageData(img,0,y%512);
+
       await new Promise(r=>setTimeout(r,0));
     }
   }
 
-  await writable.close();
-  log("Zapis zakończony. Jeśli dysk przeżył, masz ~8GB BMP.");
+  await file.close();
+  alert("Zapis zakończony");
 }
-
-document.getElementById("start").onclick = saveHugeBMP;
 </script>
 </body>
 </html>
