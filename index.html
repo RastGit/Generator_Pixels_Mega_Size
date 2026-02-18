@@ -2,86 +2,140 @@
 <html lang="pl">
 <head>
   <meta charset="UTF-8" />
-  <title>Mega Generator</title>
+  <meta name="viewport" content="width=device-width,initial-scale=1.0" />
+  <title>Mega Generator x3</title>
   <style>
-    body { font-family: sans-serif; background:#111; color:#eee; }
-    #log { white-space: pre; max-height: 200px; overflow:auto; }
-    button { padding:10px 16px; font-size:16px; }
+    body { background:#0f0f12; color:#e8e8ea; font-family: system-ui, sans-serif; margin:0; }
+    header { padding:16px 20px; border-bottom:1px solid #222; }
+    main { padding:16px 20px; display:grid; gap:12px; }
+    .row { display:flex; gap:12px; flex-wrap:wrap; align-items:center; }
+    button { padding:10px 14px; font-size:15px; background:#1f1f26; color:#e8e8ea; border:1px solid #333; border-radius:8px; cursor:pointer; }
+    button:hover { background:#262631; }
+    #log { white-space:pre-wrap; max-height:220px; overflow:auto; background:#121218; border:1px solid #222; padding:10px; border-radius:8px; }
+    canvas { border:1px solid #222; border-radius:8px; max-width:100%; height:auto; }
+    .grid { display:grid; grid-template-columns:1fr; gap:12px; }
+    .card { background:#121218; border:1px solid #222; padding:12px; border-radius:10px; }
+    .muted { color:#9aa0a6; font-size:13px; }
+    footer { padding:16px 20px; border-top:1px solid #222; color:#9aa0a6; }
   </style>
 </head>
 <body>
-  <h2>Generator absurdalnie dużego obrazu</h2>
-  <button id="start">Start</button>
-  <button id="save">Zapisz PNG</button>
-  <div id="log"></div>
-  <canvas id="c"></canvas>
+  <header>
+    <h2>Mega Generator: 1 000 000 cykli × 3 warstwy</h2>
+    <div class="muted">Hybryda GPU/CPU, kafelkowanie, yield do event loopa, kompozycja na koniec.</div>
+  </header>
 
-<script>
-const W = 20000;        // docelowa szerokość
-const H = 20000;        // docelowa wysokość
-const TILE = 40;        // rozmiar kafelka (im mniejszy, tym więcej cykli)
-const MIN_CYCLES = 500000;
+  <main>
+    <div class="row">
+      <label>Wymiar bazowy:</label>
+      <input id="size" type="number" value="20000" min="4000" step="1000" />
+      <label>Kafelek:</label>
+      <input id="tile" type="number" value="32" min="8" step="4" />
+      <label>Cykle na warstwę:</label>
+      <input id="cycles" type="number" value="1000000" min="100000" step="100000" />
+    </div>
 
-const canvas = document.getElementById("c");
-const ctx = canvas.getContext("2d");
-canvas.width = W;
-canvas.height = H;
+    <div class="row">
+      <button id="start">Start generowania</button>
+      <button id="compose">Złóż warstwy</button>
+      <button id="save">Zapisz kompozycję PNG</button>
+      <button id="saveParts">Zapisz warstwy</button>
+    </div>
 
-const log = (t) => {
-  const el = document.getElementById("log");
-  el.textContent += t + "\n";
-  el.scrollTop = el.scrollHeight;
-};
+    <div id="log"></div>
 
-function randomTile(w, h) {
-  const img = ctx.createImageData(w, h);
-  const d = img.data;
-  for (let i = 0; i < d.length; i += 4) {
-    d[i]   = Math.random() * 256; // R
-    d[i+1] = Math.random() * 256; // G
-    d[i+2] = Math.random() * 256; // B
-    d[i+3] = 255;                 // A
-  }
-  return img;
-}
+    <div class="grid">
+      <div class="card">
+        <div>Warstwa 1</div>
+        <canvas id="layer1"></canvas>
+      </div>
+      <div class="card">
+        <div>Warstwa 2</div>
+        <canvas id="layer2"></canvas>
+      </div>
+      <div class="card">
+        <div>Warstwa 3</div>
+        <canvas id="layer3"></canvas>
+      </div>
+      <div class="card">
+        <div>Kompozycja</div>
+        <canvas id="final"></canvas>
+      </div>
+    </div>
+  </main>
 
-async function generate() {
-  let cycles = 0;
+  <footer>
+    Jeśli przeglądarka zniknie, to nie bug, to fizyka. Zmniejsz wymiar lub kafelek.
+  </footer>
 
-  for (let y = 0; y < H; y += TILE) {
-    for (let x = 0; x < W; x += TILE) {
-      const w = Math.min(TILE, W - x);
-      const h = Math.min(TILE, H - y);
+  <script type="module">
+    import { runGpuPass, initWebGL } from "./gpu.js";
+    import { runCpuPass } from "./cpu.js";
+    import { smartYield, composeLayers, saveCanvas, logFactory, clampSize } from "./optimize.js";
 
-      const tile = randomTile(w, h);
-      ctx.putImageData(tile, x, y);
+    const log = logFactory(document.getElementById("log"));
 
-      cycles++;
-      if (cycles % 1000 === 0) {
-        log("Cykle: " + cycles);
-        await new Promise(r => setTimeout(r, 0)); // oddaj oddech przeglądarce
-      }
-      if (cycles >= MIN_CYCLES) {
-        log("Osiągnięto min. cykli: " + cycles);
-        return;
-      }
+    const l1 = document.getElementById("layer1");
+    const l2 = document.getElementById("layer2");
+    const l3 = document.getElementById("layer3");
+    const lf = document.getElementById("final");
+
+    const ctx1 = l1.getContext("2d", { willReadFrequently: false });
+    const ctx2 = l2.getContext("2d", { willReadFrequently: false });
+    const ctx3 = l3.getContext("2d", { willReadFrequently: false });
+    const ctxf = lf.getContext("2d", { willReadFrequently: false });
+
+    function setupCanvases(size) {
+      const safe = clampSize(size);
+      [l1, l2, l3, lf].forEach(c => { c.width = safe; c.height = safe; });
+      log("Ustawiono rozmiar: " + safe + "×" + safe);
+      return safe;
     }
-  }
-  log("Koniec siatki. Cykle: " + cycles);
-}
 
-document.getElementById("start").onclick = () => {
-  log("Start generowania… przygotuj chłodzenie.");
-  generate();
-};
+    async function generateLayer(ctx, size, tile, cycles, label) {
+      log(`Start ${label}: GPU ~1/3, CPU ~2/3, cykle=${cycles}`);
+      const gl = initWebGL(size, size);
+      const gpuCycles = Math.floor(cycles / 3);
+      const cpuCycles = cycles - gpuCycles;
 
-document.getElementById("save").onclick = () => {
-  const a = document.createElement("a");
-  a.href = canvas.toDataURL("image/png");
-  a.download = "mega.png";
-  a.click();
-};
-</script>
-</body
-  >
+      await runGpuPass(gl, ctx, size, size, tile, gpuCycles, log);
+      await smartYield();
+
+      await runCpuPass(ctx, size, size, tile, cpuCycles, log);
+      await smartYield();
+
+      log(`Koniec ${label}`);
+    }
+
+    document.getElementById("start").onclick = async () => {
+      const size = setupCanvases(parseInt(document.getElementById("size").value, 10));
+      const tile = parseInt(document.getElementById("tile").value, 10);
+      const cycles = parseInt(document.getElementById("cycles").value, 10);
+
+      await generateLayer(ctx1, size, tile, cycles, "Warstwa 1");
+      await generateLayer(ctx2, size, tile, cycles, "Warstwa 2");
+      await generateLayer(ctx3, size, tile, cycles, "Warstwa 3");
+
+      log("Wszystkie warstwy gotowe. Złóż je jak kanapkę.");
+    };
+
+    document.getElementById("compose").onclick = async () => {
+      composeLayers(ctxf, [l1, l2, l3]);
+      log("Kompozycja wykonana.");
+      await smartYield();
+    };
+
+    document.getElementById("save").onclick = () => {
+      saveCanvas(lf, "mega_final.png");
+      log("Zapisano kompozycję.");
+    };
+
+    document.getElementById("saveParts").onclick = () => {
+      saveCanvas(l1, "layer1.png");
+      saveCanvas(l2, "layer2.png");
+      saveCanvas(l3, "layer3.png");
+      log("Zapisano warstwy.");
+    };
+  </script>
+</body>
 </html>
