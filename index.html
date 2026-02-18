@@ -2,141 +2,289 @@
 <html lang="pl">
 <head>
 <meta charset="UTF-8">
-<title>Generator 8GB Firefox Edition</title>
+<title>Gigantyczny Generator Obrazu</title>
+
 <style>
-body{background:#111;color:#eee;font-family:sans-serif;margin:0;padding:20px}
-#controls{display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin-bottom:10px}
-label{font-size:12px;color:#aaa}
-input,select{width:100%;padding:6px;background:#222;color:#eee;border:1px solid #444}
-canvas{border:1px solid #444;margin-top:10px;max-width:600px}
-#bar{position:fixed;bottom:0;left:0;width:100%;height:26px;background:#333}
-#prog{height:100%;width:0%;background:#4caf50}
-#txt{position:fixed;bottom:4px;left:50%;transform:translateX(-50%);font-weight:bold}
-button{padding:10px;background:#222;color:#eee;border:1px solid #555}
+body{
+ background:#111;
+ color:#eee;
+ font-family:Arial, sans-serif;
+ margin:0;
+ padding:20px;
+}
+h2{margin-top:0}
+#controls{
+ display:grid;
+ grid-template-columns:repeat(4,1fr);
+ gap:10px;
+ margin-bottom:10px;
+}
+label{
+ font-size:12px;
+ color:#aaa;
+}
+input,select{
+ width:100%;
+ padding:6px;
+ background:#222;
+ color:#eee;
+ border:1px solid #444;
+}
+canvas{
+ border:1px solid #444;
+ margin-top:10px;
+ max-width:600px;
+}
+#bar{
+ position:fixed;
+ bottom:0;
+ left:0;
+ width:100%;
+ height:26px;
+ background:#333;
+}
+#prog{
+ height:100%;
+ width:0%;
+ background:#4caf50;
+}
+#txt{
+ position:fixed;
+ bottom:4px;
+ left:50%;
+ transform:translateX(-50%);
+ font-weight:bold;
+}
+button{
+ padding:10px;
+ background:#222;
+ color:#eee;
+ border:1px solid #555;
+ margin-right:5px;
+ margin-top:5px;
+}
 </style>
 </head>
+
 <body>
 
 <h2>Generator gigantycznego obrazu</h2>
 
 <div id="controls">
-<div><label>Rozmiar docelowy</label>
+
+<div>
+<label>Rozmiar docelowy GB</label>
 <select id="size">
-<option>0.5</option><option>1</option><option>2</option>
-<option>3</option><option>4</option><option>5</option>
-<option>6</option><option>7</option><option selected>8</option>
-</select></div>
+<option>0.5</option>
+<option>1</option>
+<option>2</option>
+<option>3</option>
+<option>4</option>
+<option>5</option>
+<option>6</option>
+<option>7</option>
+<option selected>8</option>
+</select>
+</div>
 
-<div><label>Delay ms</label>
-<input id="delay" type="number" value="1"></div>
+<div>
+<label>Delay ms</label>
+<input id="delay" type="number" value="1">
+</div>
 
-<div><label>Rozmiar kafelka</label>
-<input id="tile" type="number" value="32"></div>
+<div>
+<label>Rozmiar kafelka</label>
+<input id="tile" type="number" value="32">
+</div>
 
-<div><label>Cykle</label>
-<input id="cycles" type="number" value="1000000"></div>
+<div>
+<label>Cykle</label>
+<input id="cycles" type="number" value="1000000">
+</div>
 
-<div><label>Preview skala</label>
-<input id="previewScale" type="number" value="4"></div>
+<div>
+<label>Preview skala</label>
+<input id="previewScale" type="number" value="4">
+</div>
 
-<div><label>Seed</label>
-<input id="seed" type="number" value="12345"></div>
+<div>
+<label>Seed</label>
+<input id="seed" type="number" value="12345">
+</div>
 
-<div><label>Ilość części</label>
-<input id="parts" type="number" value="4"></div>
+<div>
+<label>Ilość części</label>
+<input id="parts" type="number" value="4">
+</div>
 
-<div><label>Tryb kolorów</label>
+<div>
+<label>Tryb kolorów</label>
 <select id="mode">
 <option>random</option>
 <option>noise</option>
 <option>pattern</option>
-</select></div>
+</select>
 </div>
 
-<button onclick="start()">START</button>
+</div>
+
+<button onclick="Generator.start()">START</button>
 
 <canvas id="preview" width="512" height="512"></canvas>
 
 <div id="bar"><div id="prog"></div></div>
 <div id="txt">0%</div>
 
+<div>
+<button onclick="Downloader.method1()">Download 1</button>
+<button onclick="Downloader.method2()">Download 2</button>
+<button onclick="Downloader.method3()">Download 3</button>
+<button onclick="Downloader.method4()">Download 4</button>
+<button onclick="Downloader.method5()">Download 5</button>
+<button onclick="Downloader.method6()">Download 6</button>
+</div>
+
 <script>
-const canvas=document.getElementById("preview");
-const ctx=canvas.getContext("2d");
 
-let buffers=[];
-let running=false;
+const UI = {
+ canvas: document.getElementById("preview"),
+ ctx: document.getElementById("preview").getContext("2d"),
+ progressBar: document.getElementById("prog"),
+ progressText: document.getElementById("txt")
+};
 
-function rand(seed){
- seed=(seed*1664525+1013904223)%4294967296;
- return seed&255;
-}
+const State = {
+ buffers: [],
+ running: false,
+ totalBytes: 0,
+ doneBytes: 0,
+ logicalMax: 1000000
+};
 
-async function start(){
- running=true;
- buffers=[];
+const Utils = {
 
- const sizeGB=parseFloat(size.value);
- const totalBytes=sizeGB*1024*1024*1024;
- const partCount=parseInt(parts.value);
+ sleep(ms){
+  return new Promise(r=>setTimeout(r,ms));
+ },
 
- const partBytes=Math.floor(totalBytes/partCount);
- const delayMs=parseInt(delay.value);
+ randomByte(){
+  return Math.floor(Math.random()*256);
+ },
 
- let done=0;
+ updateProgress(){
+  const pct = State.doneBytes / State.totalBytes * 100;
+  UI.progressBar.style.width = pct + "%";
+  UI.progressText.textContent = pct.toFixed(2) + "%";
+ },
 
- for(let p=0;p<partCount;p++){
-   let arr=new Uint8Array(partBytes);
+ drawPreview(r,g,b){
+  const logicalProgress = State.doneBytes / State.totalBytes * State.logicalMax;
+  const scale = logicalProgress / State.logicalMax;
+  const size = Math.floor(scale * UI.canvas.width);
 
-   for(let i=0;i<partBytes;i+=3){
-     arr[i]=Math.random()*256;
-     arr[i+1]=Math.random()*256;
-     arr[i+2]=Math.random()*256;
-
-     const px=(i/3)%512;
-     const py=Math.floor((i/3)/512)%512;
-     ctx.fillStyle=`rgb(${arr[i]},${arr[i+1]},${arr[i+2]})`;
-     ctx.fillRect(px,py,1,1);
-
-     done+=3;
-
-     if(i%100000===0){
-       const pct=(done/totalBytes*100).toFixed(2);
-       prog.style.width=pct+"%";
-       txt.textContent=pct+"%";
-       await new Promise(r=>setTimeout(r,delayMs));
-     }
-   }
-
-   buffers.push(arr);
-   arr=null;
+  UI.ctx.fillStyle = `rgb(${r},${g},${b})`;
+  UI.ctx.fillRect(
+   Math.random()*size,
+   Math.random()*size,
+   1,1
+  );
  }
 
- alert("Generowanie zakończone");
+};
+
+const Generator = {
+
+ async start(){
+  State.running = true;
+  State.buffers = [];
+  State.doneBytes = 0;
+
+  UI.ctx.clearRect(0,0,UI.canvas.width,UI.canvas.height);
+
+  const sizeGB = parseFloat(size.value);
+  const delayMs = parseInt(delay.value);
+  const parts = parseInt(partsInput());
+  State.totalBytes = sizeGB*1024*1024*1024;
+
+  const partBytes = Math.floor(State.totalBytes/parts);
+
+  for(let p=0;p<parts;p++){
+   await this.generatePart(partBytes,delayMs);
+  }
+
+  alert("Generowanie zakończone");
+ },
+
+ async generatePart(bytes,delayMs){
+  let arr = new Uint8Array(bytes);
+
+  for(let i=0;i<bytes;i+=3){
+
+   const r = Utils.randomByte();
+   const g = Utils.randomByte();
+   const b = Utils.randomByte();
+
+   arr[i]=r;
+   arr[i+1]=g;
+   arr[i+2]=b;
+
+   State.doneBytes += 3;
+
+   Utils.drawPreview(r,g,b);
+
+   if(i%100000===0){
+    Utils.updateProgress();
+    await Utils.sleep(delayMs);
+   }
+  }
+
+  State.buffers.push(arr);
+  arr=null;
+ }
+
+};
+
+function partsInput(){
+ return document.getElementById("parts").value;
 }
 
-function downloadBlob(blob,name){
- const a=document.createElement("a");
- a.href=URL.createObjectURL(blob);
- a.download=name;
- a.click();
-}
+const Downloader = {
 
-function download1(){buffers.forEach((b,i)=>downloadBlob(new Blob([b]),"part_"+i+".bin"))}
-function download2(){downloadBlob(new Blob(buffers),"all.bin")}
-function download3(){downloadBlob(new Blob(buffers,{type:"application/octet-stream"}),"raw.dat")}
-function download4(){downloadBlob(new Blob(buffers,{type:"image/bmp"}),"mega.bmp")}
-function download5(){buffers.forEach((b,i)=>downloadBlob(new Blob([b],{type:"application/octet-stream"}),"segment_"+i))}
-function download6(){downloadBlob(new Blob(buffers),"mega_8gb.raw")}
+ saveBlob(blob,name){
+  const a=document.createElement("a");
+  a.href=URL.createObjectURL(blob);
+  a.download=name;
+  a.click();
+ },
+
+ method1(){
+  State.buffers.forEach((b,i)=>
+   this.saveBlob(new Blob([b]),"part_"+i+".bin"));
+ },
+
+ method2(){
+  this.saveBlob(new Blob(State.buffers),"all.bin");
+ },
+
+ method3(){
+  this.saveBlob(new Blob(State.buffers,{type:"application/octet-stream"}),"raw.dat");
+ },
+
+ method4(){
+  this.saveBlob(new Blob(State.buffers,{type:"image/bmp"}),"mega.bmp");
+ },
+
+ method5(){
+  State.buffers.forEach((b,i)=>
+   this.saveBlob(new Blob([b],{type:"application/octet-stream"}),"segment_"+i));
+ },
+
+ method6(){
+  this.saveBlob(new Blob(State.buffers),"mega_8gb.raw");
+ }
+
+};
+
 </script>
-
-<br><br>
-<button onclick="download1()">Download opcja 1</button>
-<button onclick="download2()">Download opcja 2</button>
-<button onclick="download3()">Download opcja 3</button>
-<button onclick="download4()">Download opcja 4</button>
-<button onclick="download5()">Download opcja 5</button>
-<button onclick="download6()">Download opcja 6</button>
-
 </body>
 </html>
