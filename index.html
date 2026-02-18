@@ -2,91 +2,141 @@
 <html lang="pl">
 <head>
 <meta charset="UTF-8">
-<title>8GB Stream BMP</title>
+<title>Generator 8GB Firefox Edition</title>
 <style>
-body{background:#111;color:#eee;font-family:sans-serif;padding:20px}
-#bar{width:100%;height:24px;background:#333;border-radius:6px;overflow:hidden}
-#prog{height:100%;width:0%;background:#4caf50}
+body{background:#111;color:#eee;font-family:sans-serif;margin:0;padding:20px}
+#controls{display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin-bottom:10px}
+label{font-size:12px;color:#aaa}
+input,select{width:100%;padding:6px;background:#222;color:#eee;border:1px solid #444}
 canvas{border:1px solid #444;margin-top:10px;max-width:600px}
+#bar{position:fixed;bottom:0;left:0;width:100%;height:26px;background:#333}
+#prog{height:100%;width:0%;background:#4caf50}
+#txt{position:fixed;bottom:4px;left:50%;transform:translateX(-50%);font-weight:bold}
+button{padding:10px;background:#222;color:#eee;border:1px solid #555}
 </style>
 </head>
 <body>
 
-<h3>Generator 8GB BMP (strumieniowy)</h3>
-<button onclick="start()">Start</button>
-<div id="bar"><div id="prog"></div></div>
-<div id="txt">0%</div>
+<h2>Generator gigantycznego obrazu</h2>
+
+<div id="controls">
+<div><label>Rozmiar docelowy</label>
+<select id="size">
+<option>0.5</option><option>1</option><option>2</option>
+<option>3</option><option>4</option><option>5</option>
+<option>6</option><option>7</option><option selected>8</option>
+</select></div>
+
+<div><label>Delay ms</label>
+<input id="delay" type="number" value="1"></div>
+
+<div><label>Rozmiar kafelka</label>
+<input id="tile" type="number" value="32"></div>
+
+<div><label>Cykle</label>
+<input id="cycles" type="number" value="1000000"></div>
+
+<div><label>Preview skala</label>
+<input id="previewScale" type="number" value="4"></div>
+
+<div><label>Seed</label>
+<input id="seed" type="number" value="12345"></div>
+
+<div><label>Ilość części</label>
+<input id="parts" type="number" value="4"></div>
+
+<div><label>Tryb kolorów</label>
+<select id="mode">
+<option>random</option>
+<option>noise</option>
+<option>pattern</option>
+</select></div>
+</div>
+
+<button onclick="start()">START</button>
+
 <canvas id="preview" width="512" height="512"></canvas>
 
+<div id="bar"><div id="prog"></div></div>
+<div id="txt">0%</div>
+
 <script>
-const QW = 32768;
-const QH = 21845;
-const W = QW*2;
-const H = QH*2;
+const canvas=document.getElementById("preview");
+const ctx=canvas.getContext("2d");
 
-const preview = document.getElementById("preview");
-const pctx = preview.getContext("2d");
+let buffers=[];
+let running=false;
 
-function stride(w){
-  const raw=w*3;
-  return raw + ((4-(raw%4))%4);
+function rand(seed){
+ seed=(seed*1664525+1013904223)%4294967296;
+ return seed&255;
 }
-
-function rand(){return Math.floor(Math.random()*256)}
 
 async function start(){
-  const handle = await showSaveFilePicker({suggestedName:"mega_8gb.bmp"});
-  const file = await handle.createWritable();
+ running=true;
+ buffers=[];
 
-  const s = stride(W);
-  const size = 54 + s*H;
+ const sizeGB=parseFloat(size.value);
+ const totalBytes=sizeGB*1024*1024*1024;
+ const partCount=parseInt(parts.value);
 
-  const header=new Uint8Array(54);
-  header[0]=0x42;header[1]=0x4D;
-  new DataView(header.buffer).setUint32(2,size,true);
-  new DataView(header.buffer).setUint32(10,54,true);
-  new DataView(header.buffer).setUint32(14,40,true);
-  new DataView(header.buffer).setUint32(18,W,true);
-  new DataView(header.buffer).setUint32(22,H,true);
-  header[26]=1;header[28]=24;
+ const partBytes=Math.floor(totalBytes/partCount);
+ const delayMs=parseInt(delay.value);
 
-  await file.write(header);
+ let done=0;
 
-  const pad=new Uint8Array(s-W*3);
+ for(let p=0;p<partCount;p++){
+   let arr=new Uint8Array(partBytes);
 
-  for(let y=0;y<H;y++){
-    const row=new Uint8Array(W*3);
+   for(let i=0;i<partBytes;i+=3){
+     arr[i]=Math.random()*256;
+     arr[i+1]=Math.random()*256;
+     arr[i+2]=Math.random()*256;
 
-    for(let x=0;x<W;x++){
-      let r=rand(),g=rand(),b=rand();
-      const i=x*3;
-      row[i]=b;row[i+1]=g;row[i+2]=r;
-    }
+     const px=(i/3)%512;
+     const py=Math.floor((i/3)/512)%512;
+     ctx.fillStyle=`rgb(${arr[i]},${arr[i+1]},${arr[i+2]})`;
+     ctx.fillRect(px,py,1,1);
 
-    await file.write(row);
-    await file.write(pad);
+     done+=3;
 
-    if(y%200===0){
-      const pct=((y/H)*100).toFixed(2);
-      document.getElementById("prog").style.width=pct+"%";
-      document.getElementById("txt").textContent=pct+"%";
+     if(i%100000===0){
+       const pct=(done/totalBytes*100).toFixed(2);
+       prog.style.width=pct+"%";
+       txt.textContent=pct+"%";
+       await new Promise(r=>setTimeout(r,delayMs));
+     }
+   }
 
-      const img=pctx.createImageData(512,1);
-      for(let i=0;i<512;i++){
-        img.data[i*4]=row[i*3+2];
-        img.data[i*4+1]=row[i*3+1];
-        img.data[i*4+2]=row[i*3];
-        img.data[i*4+3]=255;
-      }
-      pctx.putImageData(img,0,y%512);
+   buffers.push(arr);
+   arr=null;
+ }
 
-      await new Promise(r=>setTimeout(r,0));
-    }
-  }
-
-  await file.close();
-  alert("Zapis zakończony");
+ alert("Generowanie zakończone");
 }
+
+function downloadBlob(blob,name){
+ const a=document.createElement("a");
+ a.href=URL.createObjectURL(blob);
+ a.download=name;
+ a.click();
+}
+
+function download1(){buffers.forEach((b,i)=>downloadBlob(new Blob([b]),"part_"+i+".bin"))}
+function download2(){downloadBlob(new Blob(buffers),"all.bin")}
+function download3(){downloadBlob(new Blob(buffers,{type:"application/octet-stream"}),"raw.dat")}
+function download4(){downloadBlob(new Blob(buffers,{type:"image/bmp"}),"mega.bmp")}
+function download5(){buffers.forEach((b,i)=>downloadBlob(new Blob([b],{type:"application/octet-stream"}),"segment_"+i))}
+function download6(){downloadBlob(new Blob(buffers),"mega_8gb.raw")}
 </script>
+
+<br><br>
+<button onclick="download1()">Download opcja 1</button>
+<button onclick="download2()">Download opcja 2</button>
+<button onclick="download3()">Download opcja 3</button>
+<button onclick="download4()">Download opcja 4</button>
+<button onclick="download5()">Download opcja 5</button>
+<button onclick="download6()">Download opcja 6</button>
+
 </body>
 </html>
