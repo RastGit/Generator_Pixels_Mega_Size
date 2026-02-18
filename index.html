@@ -1,0 +1,87 @@
+<!DOCTYPE html>
+<html lang="pl">
+<head>
+  <meta charset="UTF-8" />
+  <title>Mega Generator</title>
+  <style>
+    body { font-family: sans-serif; background:#111; color:#eee; }
+    #log { white-space: pre; max-height: 200px; overflow:auto; }
+    button { padding:10px 16px; font-size:16px; }
+  </style>
+</head>
+<body>
+  <h2>Generator absurdalnie dużego obrazu</h2>
+  <button id="start">Start</button>
+  <button id="save">Zapisz PNG</button>
+  <div id="log"></div>
+  <canvas id="c"></canvas>
+
+<script>
+const W = 20000;        // docelowa szerokość
+const H = 20000;        // docelowa wysokość
+const TILE = 40;        // rozmiar kafelka (im mniejszy, tym więcej cykli)
+const MIN_CYCLES = 500000;
+
+const canvas = document.getElementById("c");
+const ctx = canvas.getContext("2d");
+canvas.width = W;
+canvas.height = H;
+
+const log = (t) => {
+  const el = document.getElementById("log");
+  el.textContent += t + "\n";
+  el.scrollTop = el.scrollHeight;
+};
+
+function randomTile(w, h) {
+  const img = ctx.createImageData(w, h);
+  const d = img.data;
+  for (let i = 0; i < d.length; i += 4) {
+    d[i]   = Math.random() * 256; // R
+    d[i+1] = Math.random() * 256; // G
+    d[i+2] = Math.random() * 256; // B
+    d[i+3] = 255;                 // A
+  }
+  return img;
+}
+
+async function generate() {
+  let cycles = 0;
+
+  for (let y = 0; y < H; y += TILE) {
+    for (let x = 0; x < W; x += TILE) {
+      const w = Math.min(TILE, W - x);
+      const h = Math.min(TILE, H - y);
+
+      const tile = randomTile(w, h);
+      ctx.putImageData(tile, x, y);
+
+      cycles++;
+      if (cycles % 1000 === 0) {
+        log("Cykle: " + cycles);
+        await new Promise(r => setTimeout(r, 0)); // oddaj oddech przeglądarce
+      }
+      if (cycles >= MIN_CYCLES) {
+        log("Osiągnięto min. cykli: " + cycles);
+        return;
+      }
+    }
+  }
+  log("Koniec siatki. Cykle: " + cycles);
+}
+
+document.getElementById("start").onclick = () => {
+  log("Start generowania… przygotuj chłodzenie.");
+  generate();
+};
+
+document.getElementById("save").onclick = () => {
+  const a = document.createElement("a");
+  a.href = canvas.toDataURL("image/png");
+  a.download = "mega.png";
+  a.click();
+};
+</script>
+</body
+  >
+</html>
