@@ -3,190 +3,115 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1.0">
-<title>Mega Generator — wolniej, x3, bez crasha</title>
+<title>8GB BMP 2×2</title>
 <style>
-  body { background:#0f0f12; color:#e8e8ea; font-family:system-ui,sans-serif; margin:0; }
-  header { padding:16px 20px; border-bottom:1px solid #222; }
-  main { padding:16px 20px; display:grid; gap:12px; }
-  .row { display:flex; gap:12px; flex-wrap:wrap; align-items:center; }
-  button { padding:10px 14px; font-size:15px; background:#1f1f26; color:#e8e8ea; border:1px solid #333; border-radius:8px; cursor:pointer; }
-  button:hover { background:#262631; }
-  #log { white-space:pre-wrap; max-height:180px; overflow:auto; background:#121218; border:1px solid #222; padding:10px; border-radius:8px; }
-  #stats { font-family:monospace; }
-  canvas { border:1px solid #222; border-radius:8px; max-width:100%; height:auto; }
+  body{background:#0f0f12;color:#e8e8ea;font-family:system-ui,sans-serif;margin:0;padding:16px}
+  button{padding:10px 14px;font-size:15px;background:#1f1f26;color:#e8e8ea;border:1px solid #333;border-radius:8px;cursor:pointer}
+  #log{white-space:pre-wrap;background:#121218;border:1px solid #222;padding:10px;border-radius:8px;margin-top:12px}
 </style>
 </head>
 <body>
-<header>
-  <h2>Generator: wolniej + 3 przebiegi + łączenie</h2>
-</header>
-
-<main>
-  <div class="row">
-    <label>Rozmiar:</label>
-    <input id="size" type="number" value="8000" min="2000" step="500">
-    <label>Kafelek:</label>
-    <input id="tile" type="number" value="32" min="8" step="4">
-    <label>Cykle na przebieg:</label>
-    <input id="cycles" type="number" value="1000000" min="1000" step="1000">
-    <label>Opóźnienie (ms):</label>
-    <input id="delay" type="number" value="2" min="0" step="1">
-  </div>
-
-  <div class="row">
-    <button id="start">Start (3 przebiegi)</button>
-    <button id="stop">Stop</button>
-    <button id="compose">Połącz</button>
-    <button id="saveParts">Pobierz 4 części</button>
-  </div>
-
-  <div id="stats">Wykonano: 0 | Pozostało: 0 | %: 0 | Przebieg: 0/3</div>
-  <div id="log"></div>
-
-  <canvas id="c1"></canvas>
-  <canvas id="c2"></canvas>
-  <canvas id="c3"></canvas>
-  <canvas id="final"></canvas>
-</main>
+<h2>Generator BMP ~8GB (4 obrazy w kwadracie 2×2)</h2>
+<button id="start">Generuj i zapisz</button>
+<div id="log"></div>
 
 <script>
 const logEl = document.getElementById("log");
-const statsEl = document.getElementById("stats");
+const log = t => { logEl.textContent += t + "\\n"; };
 
-const c1 = document.getElementById("c1");
-const c2 = document.getElementById("c2");
-const c3 = document.getElementById("c3");
-const cf = document.getElementById("final");
+// Wymiary ćwiartki dobrane, by 4×RGB bez kompresji ≈ 8GB.
+// Możesz zmienić, ale wtedy rozmiar się zmieni.
+const QW = 32768; // szerokość ćwiartki
+const QH = 21845; // wysokość ćwiartki
+// Całość:
+const W = QW * 2;
+const H = QH * 2;
 
-const x1 = c1.getContext("2d");
-const x2 = c2.getContext("2d");
-const x3 = c3.getContext("2d");
-const xf = cf.getContext("2d");
-
-let running = false;
-
-function log(t){
-  logEl.textContent += t + "\n";
-  logEl.scrollTop = logEl.scrollHeight;
+// BMP 24-bit: 3 bajty/piksel + padding do 4 bajtów na linię
+function rowStride(width){
+  const raw = width * 3;
+  return raw + ((4 - (raw % 4)) % 4);
 }
 
-function updateStats(done, total, pass){
-  const left = Math.max(0, total - done);
-  const pct = ((done/total)*100).toFixed(2);
-  statsEl.textContent =
-    `Wykonano: ${done} | Pozostało: ${left} | %: ${pct} | Przebieg: ${pass}/3`;
-}
-
-function randomTile(ctx, w, h){
-  const img = ctx.createImageData(w,h);
-  const d = img.data;
-  for(let i=0;i<d.length;i+=4){
-    d[i]   = Math.random()*256;
-    d[i+1] = Math.random()*256;
-    d[i+2] = Math.random()*256;
-    d[i+3] = 255;
+function writeLE(view, offset, value, bytes){
+  for(let i=0;i<bytes;i++){
+    view.setUint8(offset+i, value & 0xFF);
+    value >>>= 8;
   }
-  return img;
 }
 
-async function generateOn(ctx, size, tile, cycles, delayMs, pass){
-  let done = 0;
-  for(let y=0; y<size && running; y+=tile){
-    for(let x=0; x<size && running; x+=tile){
-      const w = Math.min(tile, size-x);
-      const h = Math.min(tile, size-y);
+async function saveHugeBMP(){
+  if(!window.showSaveFilePicker){
+    log("Twoja przeglądarka nie wspiera zapisu strumieniowego. Użyj Chrome/Edge.");
+    return;
+  }
 
-      ctx.putImageData(randomTile(ctx, w, h), x, y);
-      done++;
+  const fileHandle = await window.showSaveFilePicker({
+    suggestedName: "mega_8gb.bmp",
+    types: [{ description: "BMP", accept: {"image/bmp":[".bmp"]} }]
+  });
+  const writable = await fileHandle.createWritable();
 
-      if(done % 25 === 0){
-        updateStats(done, cycles, pass);
-        await new Promise(r=>setTimeout(r, delayMs)); // sztuczne spowolnienie
-      }
-      if(done >= cycles){
-        updateStats(done, cycles, pass);
-        return;
-      }
+  const stride = rowStride(W);
+  const pixelDataSize = stride * H;
+  const fileSize = 14 + 40 + pixelDataSize; // nagłówek BMP + DIB + dane
+
+  // --- Nagłówek BMP (14B) + DIB (40B) ---
+  const header = new ArrayBuffer(54);
+  const view = new DataView(header);
+  // 'BM'
+  view.setUint8(0, 0x42); view.setUint8(1, 0x4D);
+  writeLE(view, 2, fileSize, 4);
+  writeLE(view, 10, 54, 4); // offset danych
+  writeLE(view, 14, 40, 4); // rozmiar DIB
+  writeLE(view, 18, W, 4);
+  writeLE(view, 22, H, 4);
+  writeLE(view, 26, 1, 2);  // planes
+  writeLE(view, 28, 24, 2); // bpp
+  writeLE(view, 34, pixelDataSize, 4);
+
+  await writable.write(header);
+
+  // --- Dane pikseli: zapis od dołu (BMP tak chce) ---
+  const pad = new Uint8Array(stride - W*3);
+  let rowsDone = 0;
+  const totalRows = H;
+
+  function randByte(){ return Math.floor(Math.random()*256); }
+
+  for(let y=0; y<H; y++){
+    // Tworzymy linię z 4 różnych ćwiartek w układzie 2×2
+    const row = new Uint8Array(W*3);
+    for(let x=0; x<W; x++){
+      // Która ćwiartka?
+      const left = x < QW;
+      const top = y >= QH; // pamiętaj: zapis od dołu, więc górna połowa to y>=QH
+      // Każda ćwiartka ma własny „charakter” losowania, żeby były różne
+      let r,g,b;
+      if(left && !top){ r=randByte(); g=randByte(); b=randByte(); }             // dół-lewo
+      else if(!left && !top){ r=randByte(); g=randByte(); b=(randByte()^128); } // dół-prawo
+      else if(left && top){ r=(randByte()^64); g=randByte(); b=randByte(); }    // góra-lewo
+      else { r=randByte(); g=(randByte()^32); b=randByte(); }                   // góra-prawo
+
+      const i = x*3;
+      row[i] = b; row[i+1] = g; row[i+2] = r; // BMP: BGR
+    }
+    await writable.write(row);
+    if(pad.length) await writable.write(pad);
+
+    rowsDone++;
+    if(rowsDone % 200 === 0){
+      const pct = ((rowsDone/totalRows)*100).toFixed(2);
+      log(`Postęp: ${rowsDone}/${totalRows} wierszy (${pct}%)`);
+      await new Promise(r=>setTimeout(r,0));
     }
   }
+
+  await writable.close();
+  log("Zapis zakończony. Jeśli dysk przeżył, masz ~8GB BMP.");
 }
 
-function setupCanvases(size){
-  [c1,c2,c3,cf].forEach(c=>{ c.width=size; c.height=size; });
-}
-
-function compose(){
-  const W = cf.width, H = cf.height;
-  xf.clearRect(0,0,W,H);
-  xf.globalCompositeOperation="source-over";
-  xf.drawImage(c1,0,0);
-  xf.globalCompositeOperation="lighter";
-  xf.drawImage(c2,0,0);
-  xf.globalCompositeOperation="overlay";
-  xf.drawImage(c3,0,0);
-  xf.globalCompositeOperation="source-over";
-  log("Połączono 3 przebiegi.");
-}
-
-async function saveInParts(canvas, nameBase){
-  const W = canvas.width, H = canvas.height;
-  const partH = Math.floor(H/4);
-  const tmp = document.createElement("canvas");
-  const tx = tmp.getContext("2d");
-
-  for(let i=0;i<4;i++){
-    const y = i*partH;
-    const h = (i===3) ? (H - y) : partH;
-    tmp.width = W; tmp.height = h;
-    tx.clearRect(0,0,W,h);
-    tx.drawImage(canvas, 0, y, W, h, 0, 0, W, h);
-
-    const a = document.createElement("a");
-    a.href = tmp.toDataURL("image/png");
-    a.download = `${nameBase}_part${i+1}.png`;
-    a.click();
-
-    await new Promise(r=>setTimeout(r, 300)); // przerwa, żeby przeglądarka nie umarła
-  }
-  log("Pobrano 4 części bez samobójstwa przeglądarki.");
-}
-
-document.getElementById("start").onclick = async ()=>{
-  if(running) return;
-  const size = parseInt(document.getElementById("size").value,10);
-  const tile = parseInt(document.getElementById("tile").value,10);
-  const cycles = parseInt(document.getElementById("cycles").value,10);
-  const delay = parseInt(document.getElementById("delay").value,10);
-
-  setupCanvases(size);
-  running = true;
-
-  log("Przebieg 1/3");
-  await generateOn(x1, size, tile, cycles, delay, 1);
-  if(!running) return;
-
-  log("Przebieg 2/3");
-  await generateOn(x2, size, tile, cycles, delay, 2);
-  if(!running) return;
-
-  log("Przebieg 3/3");
-  await generateOn(x3, size, tile, cycles, delay, 3);
-  if(!running) return;
-
-  log("Gotowe. Kliknij 'Połącz'.");
-  running = false;
-};
-
-document.getElementById("compose").onclick = compose;
-
-document.getElementById("saveParts").onclick = async ()=>{
-  await saveInParts(cf, "mega_final");
-};
-
-document.getElementById("stop").onclick = ()=>{
-  running = false;
-  log("Zatrzymano ręcznie.");
-};
+document.getElementById("start").onclick = saveHugeBMP;
 </script>
 </body>
 </html>
